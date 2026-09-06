@@ -8,21 +8,21 @@ from google import genai
 from schema import Invoice
 
 
-# --------------------------------------------------
+# ==================================================
 # LOAD ENVIRONMENT VARIABLES
-# --------------------------------------------------
+# ==================================================
 
 load_dotenv()
 
 
-# --------------------------------------------------
+# ==================================================
 # GET GEMINI API KEY
-# --------------------------------------------------
+# ==================================================
 
 api_key = os.getenv("GEMINI_API_KEY")
 
 
-# If running on Streamlit Cloud, get key from secrets
+# Streamlit Cloud
 if not api_key:
     try:
         import streamlit as st
@@ -31,21 +31,25 @@ if not api_key:
         pass
 
 
-# Make sure API key exists
+# Check API key
 if not api_key:
-    raise ValueError("GEMINI_API_KEY is not configured.")
+    raise ValueError(
+        "GEMINI_API_KEY is not configured."
+    )
 
 
-# --------------------------------------------------
+# ==================================================
 # CREATE GEMINI CLIENT
-# --------------------------------------------------
+# ==================================================
 
-client = genai.Client(api_key=api_key)
+client = genai.Client(
+    api_key=api_key
+)
 
 
-# --------------------------------------------------
-# GEMINI INVOICE EXTRACTION
-# --------------------------------------------------
+# ==================================================
+# EXTRACT INVOICE USING GEMINI
+# ==================================================
 
 def extract_with_llm(text):
 
@@ -73,9 +77,9 @@ Invoice text:
 """
 
 
-    # --------------------------------------------------
-    # GEMINI API CALL WITH RETRY
-    # --------------------------------------------------
+    # ==================================================
+    # CALL GEMINI
+    # ==================================================
 
     for attempt in range(3):
 
@@ -86,69 +90,147 @@ Invoice text:
                 contents=prompt
             )
 
-            # If successful, stop retrying
+            # Gemini succeeded
             break
+
 
         except Exception as e:
 
-            # Last attempt failed
-            if attempt == 2:
-                raise e
+            error_message = str(e)
 
-            print(
-                f"Gemini request failed. "
-                f"Retrying... ({attempt + 1}/3)"
+
+            # ==================================================
+            # 429 - QUOTA EXCEEDED
+            # ==================================================
+
+            if (
+                "429" in error_message
+                or "RESOURCE_EXHAUSTED" in error_message
+            ):
+
+                raise RuntimeError(
+                    "⚠️ Gemini API quota exceeded. "
+                    "Please try again later."
+                )
+
+
+            # ==================================================
+            # 503 - TEMPORARY GEMINI SERVER ERROR
+            # ==================================================
+
+            if (
+                "503" in error_message
+                or "UNAVAILABLE" in error_message
+            ):
+
+                if attempt == 2:
+
+                    raise RuntimeError(
+                        "⚠️ Gemini is temporarily unavailable. "
+                        "Please try again in a few minutes."
+                    )
+
+                # Wait before retry
+                time.sleep(5)
+
+                continue
+
+
+            # ==================================================
+            # OTHER GEMINI ERROR
+            # ==================================================
+
+            raise RuntimeError(
+                f"Gemini API error: {error_message}"
             )
 
-            # Wait before trying again
-            time.sleep(5)
+
+    # ==================================================
+    # PARSE GEMINI JSON
+    # ==================================================
+
+    try:
+
+        data = json.loads(
+            response.text
+        )
+
+    except json.JSONDecodeError:
+
+        raise RuntimeError(
+            "⚠️ Gemini returned an invalid JSON response."
+        )
 
 
-    # --------------------------------------------------
-    # CONVERT GEMINI RESPONSE TO JSON
-    # --------------------------------------------------
+    # ==================================================
+    # PYDANTIC VALIDATION
+    # ==================================================
 
-    data = json.loads(response.text)
+    try:
+
+        invoice = Invoice(
+            **data
+        )
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"⚠️ Invoice validation failed: {e}"
+        )
 
 
-    # --------------------------------------------------
-    # VALIDATE USING PYDANTIC
-    # --------------------------------------------------
-
-    invoice = Invoice(**data)
-
-
-    # --------------------------------------------------
-    # RETURN STRUCTURED INVOICE
-    # --------------------------------------------------
+    # ==================================================
+    # RETURN INVOICE
+    # ==================================================
 
     return invoice
 
 
-# --------------------------------------------------
+# ==================================================
 # LOCAL TEST
-# --------------------------------------------------
+# ==================================================
 
 if __name__ == "__main__":
 
-    # Read the actual invoice PDF
     from document_reader import extract_text_from_pdf
 
 
+    # Invoice PDF
     pdf_path = "data/sample_invoice.pdf"
 
 
-    # Extract text from PDF
-    text = extract_text_from_pdf(pdf_path)
+    # --------------------------------------------------
+    # READ PDF
+    # --------------------------------------------------
+
+    text = extract_text_from_pdf(
+        pdf_path
+    )
 
 
-    print("----- PDF TEXT -----")
+    print(
+        "----- PDF TEXT -----"
+    )
+
     print(text)
 
 
-    # Send invoice text to Gemini
-    result = extract_with_llm(text)
+    # --------------------------------------------------
+    # SEND TO GEMINI
+    # --------------------------------------------------
+
+    result = extract_with_llm(
+        text
+    )
 
 
-    print("\n----- GEMINI INVOICE EXTRACTION -----")
+    # --------------------------------------------------
+    # DISPLAY RESULT
+    # --------------------------------------------------
+
+    print(
+        "\n----- GEMINI INVOICE EXTRACTION -----"
+    )
+
     print(result)
+    
