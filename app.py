@@ -4,13 +4,13 @@ import os
 
 import streamlit as st
 
-# Allow imports from src/
+# --------------------------------------------------
+# ALLOW IMPORTS FROM SRC
+# --------------------------------------------------
+
 sys.path.append("src")
 
-from document_reader import extract_text_from_pdf
-from llm_extractor import extract_with_llm
-from validator import validate_invoice
-from decision import make_decision
+from graph import graph
 
 
 # --------------------------------------------------
@@ -59,14 +59,6 @@ st.markdown("""
     border: 1px solid #334155;
     background-color: #f8fafc;
     margin-bottom: 25px;
-}
-
-.metric-card {
-    padding: 20px;
-    border-radius: 15px;
-    background-color: #f8fafc;
-    border: 1px solid #e2e8f0;
-    margin-bottom: 15px;
 }
 
 .result-card {
@@ -156,6 +148,7 @@ Supported format: PDF
 </div>
 """, unsafe_allow_html=True)
 
+
 uploaded_file = st.file_uploader(
     "Choose an invoice PDF",
     type=["pdf"],
@@ -171,100 +164,145 @@ if uploaded_file is not None:
 
     st.success(f"Uploaded: {uploaded_file.name}")
 
-    if st.button("🚀 Process Invoice", use_container_width=True):
+    if st.button(
+        "🚀 Process Invoice",
+        use_container_width=True
+    ):
+
+        temp_path = None
 
         try:
 
-            with st.spinner("🤖 AI is analyzing your invoice..."):
+            # ------------------------------------------
+            # CREATE TEMPORARY PDF
+            # ------------------------------------------
 
-                # Save uploaded PDF temporarily
-                with tempfile.NamedTemporaryFile(
-                    delete=False,
-                    suffix=".pdf"
-                ) as temp_file:
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".pdf"
+            ) as temp_file:
 
-                    temp_file.write(uploaded_file.getvalue())
-
-                    temp_path = temp_file.name
-
-
-                # STEP 1: Read PDF
-                text = extract_text_from_pdf(temp_path)
-
-
-                # STEP 2: Gemini extraction
-                invoice = extract_with_llm(text)
-
-
-                # STEP 3: Validation
-                validation = validate_invoice(invoice)
-
-
-                # STEP 4: Business decision
-                decision = make_decision(
-                    invoice,
-                    validation
+                temp_file.write(
+                    uploaded_file.getvalue()
                 )
 
-
-                # Remove temporary file
-                os.remove(temp_path)
+                temp_path = temp_file.name
 
 
-            # --------------------------------------------------
+            # ------------------------------------------
+            # RUN LANGGRAPH
+            # ------------------------------------------
+
+            with st.spinner(
+                "🤖 AI is analyzing your invoice..."
+            ):
+
+                result = graph.invoke({
+
+                    "pdf_path": temp_path,
+
+                    "text": "",
+
+                    "invoice": None,
+
+                    "validation": {},
+
+                    "decision": {}
+
+                })
+
+
+            # ------------------------------------------
+            # GET RESULTS FROM LANGGRAPH
+            # ------------------------------------------
+
+            invoice = result["invoice"]
+
+            validation = result["validation"]
+
+            decision = result["decision"]
+
+
+            # ------------------------------------------
             # RESULTS
-            # --------------------------------------------------
+            # ------------------------------------------
 
             st.markdown("---")
 
             st.markdown("## 📊 Invoice Analysis")
 
 
-            # Invoice information
+            # ------------------------------------------
+            # INVOICE INFORMATION
+            # ------------------------------------------
 
             col1, col2, col3, col4 = st.columns(4)
 
+
             with col1:
+
                 st.metric(
                     "Invoice Number",
                     invoice.invoice_number
                 )
 
+
             with col2:
+
                 st.metric(
                     "Vendor",
                     invoice.vendor
                 )
 
+
             with col3:
+
                 st.metric(
                     "Total Amount",
                     f"${invoice.total_amount:,.2f}"
                 )
 
+
             with col4:
+
                 st.metric(
                     "Invoice Date",
                     invoice.invoice_date
                 )
 
 
-            # Validation
+            # ------------------------------------------
+            # VALIDATION
+            # ------------------------------------------
 
             st.markdown("### ✅ Validation")
 
+
             if validation["valid"]:
-                st.success("Invoice data is valid.")
+
+                st.success(
+                    "Invoice data is valid."
+                )
+
             else:
-                st.error("Invoice data contains errors.")
+
+                st.error(
+                    "Invoice data contains errors."
+                )
 
                 for error in validation["errors"]:
-                    st.write(f"• {error}")
+
+                    st.write(
+                        f"• {error}"
+                    )
 
 
-            # Decision
+            # ------------------------------------------
+            # DECISION
+            # ------------------------------------------
 
             st.markdown("### 🧠 AI Decision")
+
 
             if decision["decision"] == "APPROVE":
 
@@ -279,6 +317,7 @@ if uploaded_file is not None:
 
                 </div>
                 """, unsafe_allow_html=True)
+
 
             else:
 
@@ -300,36 +339,102 @@ if uploaded_file is not None:
             )
 
 
-            # Processing pipeline
+            # ------------------------------------------
+            # PROCESSING PIPELINE
+            # ------------------------------------------
 
-            st.markdown("### 🔄 Processing Pipeline")
+            st.markdown(
+                "### 🔄 Processing Pipeline"
+            )
+
 
             pipeline_col1, pipeline_col2, pipeline_col3, pipeline_col4 = st.columns(4)
 
+
             with pipeline_col1:
+
                 st.success("📄 PDF Read")
 
+
             with pipeline_col2:
+
                 st.success("🤖 AI Extraction")
 
+
             with pipeline_col3:
+
                 st.success("✅ Validation")
+
 
             with pipeline_col4:
 
                 if decision["decision"] == "APPROVE":
+
                     st.success("✅ Approved")
+
                 else:
+
                     st.warning("⚠️ Review")
 
 
+        # ------------------------------------------
+        # ERROR HANDLING
+        # ------------------------------------------
+
         except Exception as e:
 
-            st.error(
-                "Something went wrong while processing the invoice."
-            )
+            message = str(e)
 
-            st.exception(e)
+
+            if (
+                "429" in message
+                or "RESOURCE_EXHAUSTED" in message
+                or "quota" in message.lower()
+            ):
+
+                st.error(
+                    "⚠️ Gemini API quota temporarily unavailable. "
+                    "Please try again later."
+                )
+
+
+            elif (
+                "503" in message
+                or "UNAVAILABLE" in message
+            ):
+
+                st.error(
+                    "⚠️ Gemini is temporarily unavailable. "
+                    "Please try again in a few minutes."
+                )
+
+
+            else:
+
+                st.error(
+                    "⚠️ Something went wrong while processing "
+                    "the invoice."
+                )
+
+
+        # ------------------------------------------
+        # DELETE TEMPORARY FILE
+        # ------------------------------------------
+
+        finally:
+
+            if (
+                temp_path
+                and os.path.exists(temp_path)
+            ):
+
+                try:
+
+                    os.remove(temp_path)
+
+                except Exception:
+
+                    pass
 
 
 else:
