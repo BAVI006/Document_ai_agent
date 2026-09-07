@@ -385,7 +385,7 @@ if uploaded_file is not None:
 
             message = str(e)
 
-
+            st.exception(e)  
             if (
                 "429" in message
                 or "RESOURCE_EXHAUSTED" in message
