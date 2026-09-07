@@ -6,13 +6,15 @@ from google import genai
 
 from schema import Invoice
 
+
 load_dotenv()
 
 
-# Get Gemini API key
+# Get Gemini API key from local .env
 api_key = os.getenv("GEMINI_API_KEY")
 
-# For Streamlit Cloud
+
+# Get Gemini API key from Streamlit Cloud secrets
 if not api_key:
     try:
         import streamlit as st
@@ -30,6 +32,10 @@ client = genai.Client(api_key=api_key)
 
 
 def extract_with_llm(text):
+    """
+    Extract structured invoice information using Gemini.
+    """
+
     prompt = f"""
 You are an invoice extraction assistant.
 
@@ -49,11 +55,13 @@ Return ONLY valid JSON in this exact format:
     "total_amount": 0
 }}
 
+Do not include markdown.
+Do not include explanations.
+
 Invoice text:
 {text}
 """
 
-    # Call Gemini
     try:
         response = client.models.generate_content(
             model="gemini-3.6-flash",
@@ -61,6 +69,7 @@ Invoice text:
         )
 
     except Exception as e:
+
         error_message = str(e)
 
         # Gemini quota error
@@ -70,27 +79,25 @@ Invoice text:
             or "quota" in error_message.lower()
         ):
             raise RuntimeError(
-                "⚠️ Gemini API quota temporarily unavailable. "
-                "Please try again later."
+                f"⚠️ Gemini quota error: {error_message}"
             ) from None
 
-        # Gemini server unavailable
+        # Gemini unavailable / overloaded
         if (
             "503" in error_message
             or "UNAVAILABLE" in error_message
         ):
             raise RuntimeError(
-                "⚠️ Gemini is temporarily unavailable. "
-                "Please try again in a few minutes."
+                f"⚠️ Gemini 503 error: {error_message}"
             ) from None
 
-        # Other Gemini errors
+        # Any other Gemini error
         raise RuntimeError(
-            "⚠️ Gemini API error. Please try again later."
+            f"⚠️ Gemini API error: {error_message}"
         ) from None
 
 
-    # Check Gemini response
+    # Check whether Gemini returned anything
     if not response.text:
         raise RuntimeError(
             "⚠️ Gemini returned an empty response."
@@ -107,20 +114,19 @@ Invoice text:
         ) from None
 
 
-    # Validate using Pydantic
+    # Validate extracted data using Pydantic
     try:
         invoice = Invoice(**data)
 
-    except Exception:
+    except Exception as e:
         raise RuntimeError(
-            "⚠️ Invoice data validation failed."
+            f"⚠️ Invoice data validation failed: {e}"
         ) from None
 
 
     return invoice
 
 
-# Local testing
 if __name__ == "__main__":
 
     from document_reader import extract_text_from_pdf
